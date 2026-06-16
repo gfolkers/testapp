@@ -349,8 +349,9 @@ const ISO_COLORS = ['#5B8EF0', '#7B52D9', '#C4A8F8']; // 5 / 10 / 15 min
 const ISO_MINUTES = [5, 10, 15];
 
 let currentMode = 'bus';
-let isoUnion = null;   // turf union polygon (computed once)
-let isoBbox = null;    // overpass bbox string (computed once)
+let isoPolygon = null; // largest (15-min) isochrone feature for pip test
+// Fixed bbox around Part-Dieu: 15 min walk ≈ 1.25 km, pad generously
+const STOPS_BBOX = '45.730,4.820,45.790,4.900';
 
 // ── Init map ───────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -443,10 +444,9 @@ async function fetchIsochrones() {
   return resp.json();
 }
 
-// ── Fetch stops for a given mode using isochrone bbox ────────────────────
+// ── Fetch stops for a given mode ─────────────────────────────────────────
 async function fetchStops(mode) {
-  const cfg = MODES[mode];
-  return overpassQuery(cfg.query(isoBbox), null);
+  return overpassQuery(MODES[mode].query(STOPS_BBOX), null);
 }
 
 // ── Overpass nodes → GeoJSON ──────────────────────────────────────────────
@@ -494,7 +494,7 @@ function renderStops(geojson, mode) {
 
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) => {
-      const inside = isoUnion ? turf.booleanPointInPolygon(feature, isoUnion) : false;
+      const inside = isoPolygon ? turf.booleanPointInPolygon(feature, isoPolygon) : false;
       if (inside) insideCount++;
 
       return L.circleMarker(latlng, inside
@@ -556,26 +556,18 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
 // ── Main ──────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    // 1. Fetch isochrones first — derive bbox from them for tight stop queries
-    const isoData = await fetchIsochrones();
+    // Parallel fetch: isochrones + initial stops simultaneously
+    setLoading('Chargement des données…');
+    const [isoData, stopsData] = await Promise.all([
+      fetchIsochrones(),
+      fetchStops(currentMode),
+    ]);
 
-    // Compute union polygon and bbox once
-    const isoFeatures = isoData.features;
-    isoUnion = isoFeatures[0];
-    for (let i = 1; i < isoFeatures.length; i++) {
-      try { isoUnion = turf.union(isoUnion, isoFeatures[i]); } catch (_) {}
-    }
-    // Expand bbox slightly beyond isochrones to show outside stops nearby
-    const [minLon, minLat, maxLon, maxLat] = turf.bbox(isoData);
-    const pad = 0.01; // ~700m padding
-    isoBbox = `${minLat - pad},${minLon - pad},${maxLat + pad},${maxLon + pad}`;
+    // Use the 15-min isochrone (largest) directly for point-in-polygon — no union needed
+    isoPolygon = isoData.features.find(f => f.properties.contour === 15)
+              ?? isoData.features[isoData.features.length - 1];
 
-    // 2. Render isochrones immediately
     renderIsochrones(isoData);
-
-    // 3. Fetch bus stops using the tight bbox
-    setLoading('Chargement des arrêts…');
-    const stopsData = await fetchStops(currentMode);
 
     renderStops(toGeoJSON(stopsData), currentMode);
     hideLoading();
