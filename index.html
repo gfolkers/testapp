@@ -6,6 +6,7 @@
   <title>Accessibilité piétonne — Gare Part-Dieu, Lyon</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -477,16 +478,27 @@ function renderIsochrones(geojson) {
   });
 }
 
+// ── Filter stops to those inside the isochrone union ─────────────────────
+function filterStopsInIsochrones(stopsGeoJSON, isoGeoJSON) {
+  // Build union of all isochrone polygons (use the 15-min one = largest)
+  const isoPolygons = isoGeoJSON.features;
+  if (!isoPolygons.length) return stopsGeoJSON;
+
+  // Union all isochrone features into one polygon
+  let union = isoPolygons[0];
+  for (let i = 1; i < isoPolygons.length; i++) {
+    try { union = turf.union(union, isoPolygons[i]); } catch (_) {}
+  }
+
+  const filtered = stopsGeoJSON.features.filter(stop =>
+    turf.booleanPointInPolygon(stop, union)
+  );
+
+  return { type: 'FeatureCollection', features: filtered };
+}
+
 // ── Render bus stops ──────────────────────────────────────────────────────
 function renderBusStops(geojson) {
-  const stopIcon = L.circleMarker([0, 0], {
-    radius: 4,
-    fillColor: '#4fc3f7',
-    color: '#fff',
-    weight: 1.5,
-    fillOpacity: 0.9,
-  });
-
   L.geoJSON(geojson, {
     pointToLayer: (feature, latlng) =>
       L.circleMarker(latlng, {
@@ -502,7 +514,7 @@ function renderBusStops(geojson) {
     },
   }).addTo(stopsGroup);
 
-  // Update stat counter
+  // Update stat counter — only stops inside isochrones
   document.getElementById('stat-stops').textContent =
     geojson.features.length.toLocaleString('fr-FR');
 }
@@ -532,10 +544,14 @@ function renderLyonBoundary(geojson) {
 
     setLoading('Rendu de la carte…');
 
+    // Filter stops to those inside the isochrones
+    const allStops = overpassNodesToGeoJSON(stopsData);
+    const stopsInIso = filterStopsInIsochrones(allStops, isoData);
+
     // Render layers (boundary first, then isochrones, then stops on top)
     renderLyonBoundary(overpassRelationToGeoJSON(lyonData));
     renderIsochrones(isoData);
-    renderBusStops(overpassNodesToGeoJSON(stopsData));
+    renderBusStops(stopsInIso);
 
     hideLoading();
   } catch (err) {
