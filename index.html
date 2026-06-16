@@ -16,10 +16,7 @@
       overflow: hidden;
     }
 
-    #map {
-      width: 100vw;
-      height: 100vh;
-    }
+    #map { width: 100vw; height: 100vh; }
 
     /* ── Info card top-left ── */
     #info-panel {
@@ -60,10 +57,7 @@
       margin-bottom: 16px;
     }
 
-    .stats {
-      display: flex;
-      gap: 20px;
-    }
+    .stats { display: flex; gap: 20px; }
 
     .stat-item .value {
       font-size: 22px;
@@ -90,7 +84,7 @@
       color: #fff;
       backdrop-filter: blur(8px);
       border: 1px solid rgba(255,255,255,0.07);
-      min-width: 200px;
+      min-width: 210px;
     }
 
     #legend .legend-title {
@@ -146,18 +140,56 @@
       margin-top: 4px;
     }
 
-    .dot-bus {
+    /* ── Stop legend dot (color updated dynamically) ── */
+    #legend-stop-dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
       background: #5B8EF0;
       border: 2px solid rgba(255,255,255,0.8);
       flex-shrink: 0;
+      transition: background 0.2s;
     }
 
-    .dash-line {
-      width: 28px;
-      border-top: 2px dashed #a0b4ff;
+    /* ── Mode switcher ── */
+    #mode-switcher {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .mode-btn {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: transparent;
+      color: #9090c0;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .mode-btn:hover { border-color: rgba(255,255,255,0.4); color: #fff; }
+
+    .mode-btn.active {
+      color: #fff;
+      border-color: transparent;
+    }
+
+    /* Spinner inside legend for stop reload */
+    #stop-loading {
+      display: none;
+      width: 10px;
+      height: 10px;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: #9090c0;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
       flex-shrink: 0;
     }
 
@@ -174,9 +206,7 @@
     #attribution a { color: #9090c0; text-decoration: none; }
 
     /* ── Zoom controls ── */
-    .leaflet-control-zoom {
-      border: none !important;
-    }
+    .leaflet-control-zoom { border: none !important; }
 
     .leaflet-control-zoom a {
       background: rgba(18, 18, 42, 0.92) !important;
@@ -230,11 +260,11 @@
 <div id="info-panel">
   <div class="eyebrow">Les Géomagiciens · Étude de cas</div>
   <h1>Accessibilité piétonne Gare Part-Dieu, Lyon</h1>
-  <p>Isochrones de marche calculées sur le réseau de voirie OpenStreetMap (5 km/h), arrêts de bus et limites communales.</p>
+  <p>Isochrones de marche calculées sur le réseau de voirie OpenStreetMap (5 km/h), arrêts de transport et limites communales.</p>
   <div class="stats">
     <div class="stat-item">
       <div class="value" id="stat-stops">—</div>
-      <div class="label">arrêts de bus</div>
+      <div class="label" id="stat-stops-label">arrêts</div>
     </div>
     <div class="stat-item">
       <div class="value">3</div>
@@ -266,10 +296,18 @@
     <div class="legend-check">
       <svg viewBox="0 0 10 10" fill="none"><polyline points="2,5 4,7 8,3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
-    <div class="dot-bus"></div>
-    <span>Arrêts de bus</span>
+    <div id="legend-stop-dot"></div>
+    <div id="stop-loading"></div>
+    <span id="legend-stop-label">Arrêts de bus</span>
   </div>
 
+  <!-- Mode switcher -->
+  <div id="mode-switcher">
+    <button class="mode-btn active" data-mode="bus">🚌 Bus</button>
+    <button class="mode-btn" data-mode="tram">🚋 Tramway</button>
+    <button class="mode-btn" data-mode="metro">🚇 Métro</button>
+    <button class="mode-btn" data-mode="velo">🚲 Vélo'v</button>
+  </div>
 </div>
 
 <div id="attribution">
@@ -277,10 +315,42 @@
 </div>
 
 <script>
+// ── Transport mode config ──────────────────────────────────────────────────
+const MODES = {
+  bus: {
+    label: 'Arrêts de bus',
+    statLabel: 'arrêts de bus',
+    color: '#5B8EF0',
+    query: bbox => `[out:json][timeout:25];(node["highway"="bus_stop"](${bbox}););out body;`,
+  },
+  tram: {
+    label: 'Arrêts de tramway',
+    statLabel: 'arrêts de tram',
+    color: '#26D9A0',
+    query: bbox => `[out:json][timeout:25];(node["railway"="tram_stop"](${bbox}););out body;`,
+  },
+  metro: {
+    label: 'Stations de métro',
+    statLabel: 'stations de métro',
+    color: '#FF9A3C',
+    query: bbox => `[out:json][timeout:25];(node["station"="subway"](${bbox});node["subway"="yes"](${bbox}););out body;`,
+  },
+  velo: {
+    label: "Stations Vélo'v",
+    statLabel: "stations Vélo'v",
+    color: '#F7D44C',
+    query: bbox => `[out:json][timeout:25];(node["amenity"="bicycle_rental"](${bbox}););out body;`,
+  },
+};
+
 // ── Constants ──────────────────────────────────────────────────────────────
 const GARE_PART_DIEU = [45.7605, 4.8591];
 const ISO_COLORS = ['#5B8EF0', '#7B52D9', '#C4A8F8']; // 5 / 10 / 15 min
 const ISO_MINUTES = [5, 10, 15];
+
+let currentMode = 'bus';
+let isoUnion = null;   // turf union polygon (computed once)
+let isoBbox = null;    // overpass bbox string (computed once)
 
 // ── Init map ───────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -290,7 +360,6 @@ const map = L.map('map', {
   attributionControl: false,
 });
 
-// Dark basemap
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
   subdomains: 'abcd',
@@ -301,57 +370,34 @@ const isoGroup   = L.layerGroup().addTo(map);
 const stopsGroup = L.layerGroup().addTo(map);
 
 // ── Gare marker ───────────────────────────────────────────────────────────
-const gareIcon = L.divIcon({
-  className: '',
-  html: `<div style="
-    width:16px;height:16px;
-    border-radius:50%;
-    background:#fff;
-    border:3px solid #6b7ff0;
-    box-shadow:0 0 0 4px rgba(107,127,240,0.3);
-  "></div>`,
-  iconSize: [16, 16],
-  iconAnchor: [8, 8],
-});
-L.marker(GARE_PART_DIEU, { icon: gareIcon })
-  .bindPopup('<b>Gare de Lyon Part-Dieu</b>')
-  .addTo(map);
+L.marker(GARE_PART_DIEU, {
+  icon: L.divIcon({
+    className: '',
+    html: `<div style="
+      width:16px;height:16px;border-radius:50%;
+      background:#fff;border:3px solid #6b7ff0;
+      box-shadow:0 0 0 4px rgba(107,127,240,0.3);
+    "></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  }),
+}).bindPopup('<b>Gare de Lyon Part-Dieu</b>').addTo(map);
 
-// ── Helper: update loading text ───────────────────────────────────────────
+// ── Loading helpers ───────────────────────────────────────────────────────
 function setLoading(text) {
   document.getElementById('loading-text').textContent = text;
 }
-
 function hideLoading() {
   document.getElementById('loading').style.display = 'none';
 }
-
-// ── 1. Fetch isochrones via Valhalla (public OSM instance) ────────────────
-async function fetchIsochrones() {
-  setLoading('Calcul des isochrones piétonnes…');
-
-  const body = {
-    locations: [{ lon: GARE_PART_DIEU[1], lat: GARE_PART_DIEU[0] }],
-    costing: 'pedestrian',
-    contours: ISO_MINUTES.map(m => ({ time: m })),
-    polygons: true,
-    denoise: 1,
-    generalize: 50,
-  };
-
-  const resp = await fetch('https://valhalla1.openstreetmap.de/isochrone', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) throw new Error(`Valhalla HTTP ${resp.status}`);
-  return resp.json();
+function setStopLoading(on) {
+  document.getElementById('stop-loading').style.display = on ? 'block' : 'none';
+  document.getElementById('legend-stop-dot').style.display = on ? 'none' : 'block';
 }
 
-// ── Overpass helper with retry ────────────────────────────────────────────
+// ── Overpass helper with retry + mirror fallback ──────────────────────────
 async function overpassQuery(query, label) {
-  setLoading(label);
+  if (label) setLoading(label);
   const MIRRORS = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
@@ -369,29 +415,42 @@ async function overpassQuery(query, label) {
           signal: AbortSignal.timeout(25000),
         });
         if (resp.ok) return resp.json();
-        lastErr = new Error(`Overpass HTTP ${resp.status} (${mirror})`);
-        if (resp.status === 429) continue; // rate-limited → retry
-        if (resp.status >= 500) continue;  // server error → retry
+        lastErr = new Error(`Overpass HTTP ${resp.status}`);
+        if (resp.status === 429 || resp.status >= 500) continue;
         throw lastErr;
-      } catch (e) {
-        lastErr = e;
-      }
+      } catch (e) { lastErr = e; }
     }
   }
   throw lastErr;
 }
 
-// ── 2. Fetch bus stops via Overpass API ───────────────────────────────────
-async function fetchBusStops() {
-  // bbox of Lyon commune: south, west, north, east
-  const bbox = '45.707,4.771,45.808,4.898';
-  const query = `[out:json][timeout:25];(node["highway"="bus_stop"](${bbox}););out body;`;
-  return overpassQuery(query, 'Chargement des arrêts de bus…');
+// ── Fetch isochrones ──────────────────────────────────────────────────────
+async function fetchIsochrones() {
+  setLoading('Calcul des isochrones piétonnes…');
+  const resp = await fetch('https://valhalla1.openstreetmap.de/isochrone', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      locations: [{ lon: GARE_PART_DIEU[1], lat: GARE_PART_DIEU[0] }],
+      costing: 'pedestrian',
+      contours: ISO_MINUTES.map(m => ({ time: m })),
+      polygons: true,
+      denoise: 1,
+      generalize: 50,
+    }),
+  });
+  if (!resp.ok) throw new Error(`Valhalla HTTP ${resp.status}`);
+  return resp.json();
 }
 
+// ── Fetch stops for a given mode using isochrone bbox ────────────────────
+async function fetchStops(mode) {
+  const cfg = MODES[mode];
+  return overpassQuery(cfg.query(isoBbox), null);
+}
 
 // ── Overpass nodes → GeoJSON ──────────────────────────────────────────────
-function overpassNodesToGeoJSON(data) {
+function toGeoJSON(data) {
   return {
     type: 'FeatureCollection',
     features: data.elements
@@ -406,11 +465,10 @@ function overpassNodesToGeoJSON(data) {
 
 // ── Render isochrones ─────────────────────────────────────────────────────
 function renderIsochrones(geojson) {
-  // Valhalla returns features sorted ascending; we want largest first (paint order)
-  const features = [...geojson.features].reverse();
+  const features = [...geojson.features].reverse(); // largest first
 
   features.forEach((feature, i) => {
-    const minuteValue = feature.properties.contour; // 15, 10, 5 after reverse
+    const minuteValue = feature.properties.contour;
     const colorIndex = ISO_MINUTES.indexOf(minuteValue);
     const color = ISO_COLORS[colorIndex >= 0 ? colorIndex : i] ?? '#7c4dff';
 
@@ -428,63 +486,98 @@ function renderIsochrones(geojson) {
   });
 }
 
-// ── Filter stops to those inside the isochrone union ─────────────────────
-function filterStopsInIsochrones(stopsGeoJSON, isoGeoJSON) {
-  // Build union of all isochrone polygons (use the 15-min one = largest)
-  const isoPolygons = isoGeoJSON.features;
-  if (!isoPolygons.length) return stopsGeoJSON;
+// ── Render stops: inside (vivid) + outside (dimmed) ──────────────────────
+function renderStops(geojson, mode) {
+  stopsGroup.clearLayers();
+  const cfg = MODES[mode];
+  let insideCount = 0;
 
-  // Union all isochrone features into one polygon
-  let union = isoPolygons[0];
-  for (let i = 1; i < isoPolygons.length; i++) {
-    try { union = turf.union(union, isoPolygons[i]); } catch (_) {}
-  }
-
-  const filtered = stopsGeoJSON.features.filter(stop =>
-    turf.booleanPointInPolygon(stop, union)
-  );
-
-  return { type: 'FeatureCollection', features: filtered };
-}
-
-// ── Render bus stops ──────────────────────────────────────────────────────
-function renderBusStops(geojson) {
   L.geoJSON(geojson, {
-    pointToLayer: (feature, latlng) =>
-      L.circleMarker(latlng, {
-        radius: 4,
-        fillColor: '#5B8EF0',
-        color: '#fff',
-        weight: 1,
-        fillOpacity: 0.85,
-      }),
+    pointToLayer: (feature, latlng) => {
+      const inside = isoUnion ? turf.booleanPointInPolygon(feature, isoUnion) : false;
+      if (inside) insideCount++;
+
+      return L.circleMarker(latlng, inside
+        ? { radius: 4, fillColor: cfg.color, color: '#fff', weight: 1, fillOpacity: 0.9 }
+        : { radius: 3, fillColor: '#888', color: 'transparent', weight: 0, fillOpacity: 0.35 }
+      );
+    },
     onEachFeature: (feature, layer) => {
-      const name = feature.properties.name || 'Arrêt de bus';
-      layer.bindPopup(`<b>${name}</b>`);
+      const name = feature.properties.name || cfg.label.replace('Arrêts de ', '').replace('Stations de ', '').replace('Stations ', '');
+      layer.bindPopup(`<b>${name || cfg.label}</b>`);
     },
   }).addTo(stopsGroup);
 
-  // Update stat counter — only stops inside isochrones
-  document.getElementById('stat-stops').textContent =
-    geojson.features.length.toLocaleString('fr-FR');
+  // Update stat (count inside only)
+  document.getElementById('stat-stops').textContent = insideCount.toLocaleString('fr-FR');
+  document.getElementById('stat-stops-label').textContent = cfg.statLabel;
+
+  // Update legend dot color
+  document.getElementById('legend-stop-dot').style.background = cfg.color;
+  document.getElementById('legend-stop-label').textContent = cfg.label;
+
+  // Update active button color
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    if (btn.dataset.mode === mode) {
+      btn.style.background = cfg.color + '33';
+      btn.style.borderColor = cfg.color;
+      btn.style.color = cfg.color;
+    } else {
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+    }
+  });
 }
+
+// ── Mode switch handler ───────────────────────────────────────────────────
+async function switchMode(mode) {
+  if (mode === currentMode) return;
+  currentMode = mode;
+
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  setStopLoading(true);
+
+  try {
+    const data = await fetchStops(mode);
+    renderStops(toGeoJSON(data), mode);
+  } catch (e) {
+    console.error(e);
+  } finally {
+    setStopLoading(false);
+  }
+}
+
+// ── Wire up buttons ───────────────────────────────────────────────────────
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+});
 
 // ── Main ──────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    const [isoData, stopsData] = await Promise.all([
-      fetchIsochrones(),
-      fetchBusStops(),
-    ]);
+    // 1. Fetch isochrones first — derive bbox from them for tight stop queries
+    const isoData = await fetchIsochrones();
 
-    setLoading('Rendu de la carte…');
+    // Compute union polygon and bbox once
+    const isoFeatures = isoData.features;
+    isoUnion = isoFeatures[0];
+    for (let i = 1; i < isoFeatures.length; i++) {
+      try { isoUnion = turf.union(isoUnion, isoFeatures[i]); } catch (_) {}
+    }
+    // Expand bbox slightly beyond isochrones to show outside stops nearby
+    const [minLon, minLat, maxLon, maxLat] = turf.bbox(isoData);
+    const pad = 0.01; // ~700m padding
+    isoBbox = `${minLat - pad},${minLon - pad},${maxLat + pad},${maxLon + pad}`;
 
-    const allStops = overpassNodesToGeoJSON(stopsData);
-    const stopsInIso = filterStopsInIsochrones(allStops, isoData);
-
+    // 2. Render isochrones immediately
     renderIsochrones(isoData);
-    renderBusStops(stopsInIso);
 
+    // 3. Fetch bus stops using the tight bbox
+    setLoading('Chargement des arrêts…');
+    const stopsData = await fetchStops(currentMode);
+
+    renderStops(toGeoJSON(stopsData), currentMode);
     hideLoading();
   } catch (err) {
     document.getElementById('loading').innerHTML = `
