@@ -127,19 +127,20 @@
     .legend-check svg { width: 10px; height: 10px; }
 
     .iso-gradient {
-      display: flex;
-      align-items: center;
-      gap: 0;
-      width: 120px;
-      height: 6px;
+      width: 140px;
+      height: 8px;
       border-radius: 3px;
-      background: linear-gradient(to right, #4fc3f7, #7c4dff, #e040fb);
+      background: linear-gradient(to right,
+        #5B8EF0 0%, #5B8EF0 33%,
+        #7B52D9 33%, #7B52D9 66%,
+        #C4A8F8 66%, #C4A8F8 100%
+      );
     }
 
     .iso-labels {
       display: flex;
       justify-content: space-between;
-      width: 120px;
+      width: 140px;
       font-size: 10px;
       color: #8888bb;
       margin-top: 4px;
@@ -149,8 +150,8 @@
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background: #4fc3f7;
-      border: 2px solid #fff;
+      background: #5B8EF0;
+      border: 2px solid rgba(255,255,255,0.8);
       flex-shrink: 0;
     }
 
@@ -278,7 +279,7 @@
 <script>
 // ── Constants ──────────────────────────────────────────────────────────────
 const GARE_PART_DIEU = [45.7605, 4.8591];
-const ISO_COLORS = ['#4fc3f7', '#7c4dff', '#e040fb']; // 5 / 10 / 15 min
+const ISO_COLORS = ['#5B8EF0', '#7B52D9', '#C4A8F8']; // 5 / 10 / 15 min
 const ISO_MINUTES = [5, 10, 15];
 
 // ── Init map ───────────────────────────────────────────────────────────────
@@ -416,10 +417,10 @@ function renderIsochrones(geojson) {
     L.geoJSON(feature, {
       style: {
         fillColor: color,
-        fillOpacity: colorIndex === 0 ? 0.25 : colorIndex === 1 ? 0.2 : 0.15,
+        fillOpacity: colorIndex === 0 ? 0.55 : colorIndex === 1 ? 0.35 : 0.2,
         color: color,
-        weight: 2,
-        opacity: 0.9,
+        weight: 1.5,
+        opacity: 0.85,
       },
     })
       .bindPopup(`<b>${minuteValue} min</b> à pied depuis la Gare Part-Dieu`)
@@ -452,7 +453,7 @@ function renderBusStops(geojson) {
     pointToLayer: (feature, latlng) =>
       L.circleMarker(latlng, {
         radius: 4,
-        fillColor: '#4fc3f7',
+        fillColor: '#5B8EF0',
         color: '#fff',
         weight: 1,
         fillOpacity: 0.85,
