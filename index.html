@@ -269,13 +269,6 @@
     <span>Arrêts de bus</span>
   </div>
 
-  <div class="legend-row">
-    <div class="legend-check">
-      <svg viewBox="0 0 10 10" fill="none"><polyline points="2,5 4,7 8,3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </div>
-    <div class="dash-line"></div>
-    <span>Contour de Lyon</span>
-  </div>
 </div>
 
 <div id="attribution">
@@ -305,7 +298,6 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 // ── Layer groups ───────────────────────────────────────────────────────────
 const isoGroup   = L.layerGroup().addTo(map);
 const stopsGroup = L.layerGroup().addTo(map);
-const lyonGroup  = L.layerGroup().addTo(map);
 
 // ── Gare marker ───────────────────────────────────────────────────────────
 const gareIcon = L.divIcon({
@@ -396,49 +388,6 @@ async function fetchBusStops() {
   return overpassQuery(query, 'Chargement des arrêts de bus…');
 }
 
-// ── 3. Fetch Lyon commune boundary ────────────────────────────────────────
-async function fetchLyonBoundary() {
-  const query = `[out:json][timeout:25];relation["name"="Lyon"]["admin_level"="8"]["boundary"="administrative"];out geom;`;
-  return overpassQuery(query, 'Chargement du contour de Lyon…');
-}
-
-// ── Convert Overpass relation to GeoJSON polygon ──────────────────────────
-function overpassRelationToGeoJSON(data) {
-  const features = [];
-
-  for (const el of data.elements) {
-    if (el.type !== 'relation') continue;
-
-    // Collect outer ring members
-    const outers = el.members.filter(m => m.role === 'outer');
-    const rings = [];
-
-    for (const member of outers) {
-      if (!member.geometry) continue;
-      const coords = member.geometry.map(p => [p.lon, p.lat]);
-      if (coords.length > 1) rings.push(coords);
-    }
-
-    if (rings.length === 0) continue;
-
-    // Simple approach: use longest outer ring
-    rings.sort((a, b) => b.length - a.length);
-    const ring = rings[0];
-
-    // Close the ring
-    if (ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1]) {
-      ring.push(ring[0]);
-    }
-
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Polygon', coordinates: [ring] },
-      properties: el.tags || {},
-    });
-  }
-
-  return { type: 'FeatureCollection', features };
-}
 
 // ── Overpass nodes → GeoJSON ──────────────────────────────────────────────
 function overpassNodesToGeoJSON(data) {
@@ -519,37 +468,19 @@ function renderBusStops(geojson) {
     geojson.features.length.toLocaleString('fr-FR');
 }
 
-// ── Render Lyon boundary ──────────────────────────────────────────────────
-function renderLyonBoundary(geojson) {
-  L.geoJSON(geojson, {
-    style: {
-      color: '#a0b4ff',
-      weight: 2,
-      dashArray: '6 5',
-      fillOpacity: 0,
-      opacity: 0.8,
-    },
-  }).addTo(lyonGroup);
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    // Fire all three requests in parallel
-    const [isoData, stopsData, lyonData] = await Promise.all([
+    const [isoData, stopsData] = await Promise.all([
       fetchIsochrones(),
       fetchBusStops(),
-      fetchLyonBoundary(),
     ]);
 
     setLoading('Rendu de la carte…');
 
-    // Filter stops to those inside the isochrones
     const allStops = overpassNodesToGeoJSON(stopsData);
     const stopsInIso = filterStopsInIsochrones(allStops, isoData);
 
-    // Render layers (boundary first, then isochrones, then stops on top)
-    renderLyonBoundary(overpassRelationToGeoJSON(lyonData));
     renderIsochrones(isoData);
     renderBusStops(stopsInIso);
 
