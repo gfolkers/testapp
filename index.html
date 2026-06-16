@@ -315,31 +315,52 @@
 </div>
 
 <script>
+// ── Grand Lyon WFS (primary — reliable, no rate-limit) ───────────────────
+// BBOX: minlon,minlat,maxlon,maxlat in EPSG:4326
+const GL_BBOX = '4.820,45.730,4.900,45.790,EPSG:4326';
+const GL_BASE = 'https://data.grandlyon.com/geoserver/sytral/ows';
+
+function glUrl(typename) {
+  return `${GL_BASE}?SERVICE=WFS&VERSION=2.0.0&request=GetFeature` +
+    `&typename=${typename}&outputFormat=application/json` +
+    `&SRSNAME=EPSG:4326&bbox=${GL_BBOX}`;
+}
+
+// ── Overpass fallback queries ─────────────────────────────────────────────
+const OP_BBOX = '45.730,4.820,45.790,4.900';
+function opQuery(tag) {
+  return `[out:json][timeout:20];(node[${tag}](${OP_BBOX}););out body;`;
+}
+
 // ── Transport mode config ──────────────────────────────────────────────────
 const MODES = {
   bus: {
     label: 'Arrêts de bus',
     statLabel: 'arrêts de bus',
     color: '#5B8EF0',
-    query: bbox => `[out:json][timeout:25];(node["highway"="bus_stop"](${bbox}););out body;`,
+    glLayer: 'sytral:tcl_sytral.tclpoint',
+    opTag:   '"highway"="bus_stop"',
   },
   tram: {
     label: 'Arrêts de tramway',
     statLabel: 'arrêts de tram',
     color: '#26D9A0',
-    query: bbox => `[out:json][timeout:25];(node["railway"="tram_stop"](${bbox}););out body;`,
+    glLayer: 'sytral:tcl_sytral.tclpoint',
+    opTag:   '"railway"="tram_stop"',
   },
   metro: {
     label: 'Stations de métro',
     statLabel: 'stations de métro',
     color: '#FF9A3C',
-    query: bbox => `[out:json][timeout:25];(node["station"="subway"](${bbox});node["subway"="yes"](${bbox}););out body;`,
+    glLayer: 'sytral:tcl_sytral.tclpoint',
+    opTag:   '"station"="subway"',
   },
   velo: {
     label: "Stations Vélo'v",
     statLabel: "stations Vélo'v",
     color: '#F7D44C',
-    query: bbox => `[out:json][timeout:25];(node["amenity"="bicycle_rental"](${bbox}););out body;`,
+    glLayer: 'sytral:pvo_patrimoine_voirie.pvostationvelov_1_0_0',
+    opTag:   '"amenity"="bicycle_rental"',
   },
 };
 
@@ -351,7 +372,6 @@ const ISO_MINUTES = [5, 10, 15];
 let currentMode = 'bus';
 let isoPolygon = null; // largest (15-min) isochrone feature for pip test
 // Fixed bbox around Part-Dieu: 15 min walk ≈ 1.25 km, pad generously
-const STOPS_BBOX = '45.730,4.820,45.790,4.900';
 
 // ── Init map ───────────────────────────────────────────────────────────────
 const map = L.map('map', {
@@ -396,24 +416,75 @@ function setStopLoading(on) {
   document.getElementById('legend-stop-dot').style.display = on ? 'none' : 'block';
 }
 
-// ── Overpass: race all mirrors, return first success ─────────────────────
-async function overpassQuery(query) {
+// ── sessionStorage cache ──────────────────────────────────────────────────
+function cacheGet(key) {
+  try { const v = sessionStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+function cacheSet(key, data) {
+  try { sessionStorage.setItem(key, JSON.stringify(data)); } catch {}
+}
+
+// ── Grand Lyon WFS fetch ──────────────────────────────────────────────────
+async function fetchGrandLyon(url, cacheKey) {
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
+  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error(`Grand Lyon HTTP ${r.status}`);
+  const data = await r.json();
+  cacheSet(cacheKey, data);
+  return data;
+}
+
+// ── Overpass fallback (race 3 mirrors) ───────────────────────────────────
+async function fetchOverpass(query, cacheKey) {
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
   const MIRRORS = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
     'https://overpass.openstreetmap.ru/api/interpreter',
   ];
-
   const attempt = url => fetch(url, {
     method: 'POST',
     body: 'data=' + encodeURIComponent(query),
     signal: AbortSignal.timeout(20000),
-  }).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} (${url})`);
-    return r.json();
-  });
+  }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 
-  return Promise.any(MIRRORS.map(attempt));
+  const data = await Promise.any(MIRRORS.map(attempt));
+  cacheSet(cacheKey, data);
+  return data;
+}
+
+// ── Fetch stops: Grand Lyon WFS first, Overpass fallback ─────────────────
+async function fetchStopsForMode(mode) {
+  const cfg = MODES[mode];
+  const cacheKey = `stops_${mode}`;
+  try {
+    return { source: 'gl', data: await fetchGrandLyon(glUrl(cfg.glLayer), cacheKey) };
+  } catch {
+    const data = await fetchOverpass(opQuery(cfg.opTag), cacheKey + '_op');
+    return { source: 'op', data };
+  }
+}
+
+// ── Convert response to unified GeoJSON array of points ──────────────────
+function toPoints(source, data) {
+  if (source === 'gl') {
+    // GeoJSON FeatureCollection from WFS
+    return (data.features || []).filter(f =>
+      f.geometry?.type === 'Point' || f.geometry?.type === 'MultiPoint'
+    ).map(f => {
+      const coords = f.geometry.type === 'MultiPoint'
+        ? f.geometry.coordinates[0] : f.geometry.coordinates;
+      return { type: 'Feature', geometry: { type: 'Point', coordinates: coords }, properties: f.properties };
+    });
+  }
+  // Overpass JSON
+  return (data.elements || [])
+    .filter(e => e.type === 'node')
+    .map(e => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [e.lon, e.lat] }, properties: e.tags || {} }));
 }
 
 // ── Fetch isochrones ──────────────────────────────────────────────────────
@@ -435,24 +506,7 @@ async function fetchIsochrones() {
   return resp.json();
 }
 
-// ── Fetch stops for a given mode ─────────────────────────────────────────
-async function fetchStops(mode) {
-  return overpassQuery(MODES[mode].query(STOPS_BBOX));
-}
 
-// ── Overpass nodes → GeoJSON ──────────────────────────────────────────────
-function toGeoJSON(data) {
-  return {
-    type: 'FeatureCollection',
-    features: data.elements
-      .filter(e => e.type === 'node')
-      .map(e => ({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: [e.lon, e.lat] },
-        properties: e.tags || {},
-      })),
-  };
-}
 
 // ── Render isochrones ─────────────────────────────────────────────────────
 function renderIsochrones(geojson) {
@@ -530,8 +584,8 @@ async function switchMode(mode) {
   setStopLoading(true);
 
   try {
-    const data = await fetchStops(mode);
-    renderStops(toGeoJSON(data), mode);
+    const result = await fetchStopsForMode(mode);
+    renderStops(toPoints(result.source, result.data), mode);
   } catch (e) {
     console.error(e);
   } finally {
@@ -549,18 +603,16 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
   try {
     // Parallel fetch: isochrones + initial stops simultaneously
     setLoading('Chargement des données…');
-    const [isoData, stopsData] = await Promise.all([
+    const [isoData, stopsResult] = await Promise.all([
       fetchIsochrones(),
-      fetchStops(currentMode),
+      fetchStopsForMode(currentMode),
     ]);
 
-    // Use the 15-min isochrone (largest) directly for point-in-polygon — no union needed
     isoPolygon = isoData.features.find(f => f.properties.contour === 15)
               ?? isoData.features[isoData.features.length - 1];
 
     renderIsochrones(isoData);
-
-    renderStops(toGeoJSON(stopsData), currentMode);
+    renderStops(toPoints(stopsResult.source, stopsResult.data), currentMode);
     hideLoading();
   } catch (err) {
     document.getElementById('loading').innerHTML = `
