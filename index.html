@@ -355,47 +355,50 @@ async function fetchIsochrones() {
   return resp.json();
 }
 
+// ── Overpass helper with retry ────────────────────────────────────────────
+async function overpassQuery(query, label) {
+  setLoading(label);
+  const MIRRORS = [
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+  const delays = [0, 2000, 4000, 8000];
+  let lastErr;
+
+  for (const mirror of MIRRORS) {
+    for (const delay of delays) {
+      if (delay) await new Promise(r => setTimeout(r, delay));
+      try {
+        const resp = await fetch(mirror, {
+          method: 'POST',
+          body: 'data=' + encodeURIComponent(query),
+          signal: AbortSignal.timeout(25000),
+        });
+        if (resp.ok) return resp.json();
+        lastErr = new Error(`Overpass HTTP ${resp.status} (${mirror})`);
+        if (resp.status === 429) continue; // rate-limited → retry
+        if (resp.status >= 500) continue;  // server error → retry
+        throw lastErr;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+  }
+  throw lastErr;
+}
+
 // ── 2. Fetch bus stops via Overpass API ───────────────────────────────────
 async function fetchBusStops() {
-  setLoading('Chargement des arrêts de bus…');
-
-  // Bus stop nodes tagged highway=bus_stop or public_transport=stop_position in Lyon
-  const query = `
-[out:json][timeout:30];
-area["name"="Lyon"]["admin_level"="8"]->.lyon;
-(
-  node["highway"="bus_stop"](area.lyon);
-  node["public_transport"="stop_position"]["bus"="yes"](area.lyon);
-);
-out body;
-`;
-
-  const resp = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: 'data=' + encodeURIComponent(query),
-  });
-
-  if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
-  return resp.json();
+  // bbox of Lyon commune: south, west, north, east
+  const bbox = '45.707,4.771,45.808,4.898';
+  const query = `[out:json][timeout:25];(node["highway"="bus_stop"](${bbox}););out body;`;
+  return overpassQuery(query, 'Chargement des arrêts de bus…');
 }
 
 // ── 3. Fetch Lyon commune boundary ────────────────────────────────────────
 async function fetchLyonBoundary() {
-  setLoading('Chargement du contour de Lyon…');
-
-  const query = `
-[out:json][timeout:30];
-relation["name"="Lyon"]["admin_level"="8"]["boundary"="administrative"];
-out geom;
-`;
-
-  const resp = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: 'data=' + encodeURIComponent(query),
-  });
-
-  if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
-  return resp.json();
+  const query = `[out:json][timeout:25];relation["name"="Lyon"]["admin_level"="8"]["boundary"="administrative"];out geom;`;
+  return overpassQuery(query, 'Chargement du contour de Lyon…');
 }
 
 // ── Convert Overpass relation to GeoJSON polygon ──────────────────────────
