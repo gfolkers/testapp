@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Accessibilité piétonne — Gare Part-Dieu, Lyon</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: #1a1a2e;
+      overflow: hidden;
+    }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* ── Info card top-left ── */
+    #info-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+      background: rgba(18, 18, 42, 0.92);
+      border-radius: 12px;
+      padding: 22px 26px 18px;
+      max-width: 320px;
+      color: #fff;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    #info-panel .eyebrow {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #9090c0;
+      margin-bottom: 8px;
+    }
+
+    #info-panel h1 {
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.15;
+      color: #6b7ff0;
+      margin-bottom: 12px;
+    }
+
+    #info-panel p {
+      font-size: 12px;
+      line-height: 1.6;
+      color: #aab0d0;
+      margin-bottom: 16px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 20px;
+    }
+
+    .stat-item .value {
+      font-size: 22px;
+      font-weight: 800;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .stat-item .label {
+      font-size: 10px;
+      color: #7878a8;
+      margin-top: 3px;
+    }
+
+    /* ── Legend bottom-left ── */
+    #legend {
+      position: absolute;
+      bottom: 30px;
+      left: 20px;
+      z-index: 1000;
+      background: rgba(18, 18, 42, 0.92);
+      border-radius: 12px;
+      padding: 16px 20px;
+      color: #fff;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.07);
+      min-width: 200px;
+    }
+
+    #legend .legend-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #9090c0;
+      margin-bottom: 12px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #ccd;
+    }
+
+    .legend-row:last-child { margin-bottom: 0; }
+
+    .legend-check {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: #5a5af0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .legend-check svg { width: 10px; height: 10px; }
+
+    .iso-gradient {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      width: 120px;
+      height: 6px;
+      border-radius: 3px;
+      background: linear-gradient(to right, #4fc3f7, #7c4dff, #e040fb);
+    }
+
+    .iso-labels {
+      display: flex;
+      justify-content: space-between;
+      width: 120px;
+      font-size: 10px;
+      color: #8888bb;
+      margin-top: 4px;
+    }
+
+    .dot-bus {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #4fc3f7;
+      border: 2px solid #fff;
+      flex-shrink: 0;
+    }
+
+    .dash-line {
+      width: 28px;
+      border-top: 2px dashed #a0b4ff;
+      flex-shrink: 0;
+    }
+
+    /* ── Attribution ── */
+    #attribution {
+      position: absolute;
+      bottom: 8px;
+      right: 10px;
+      z-index: 1000;
+      font-size: 10px;
+      color: #7878a8;
+    }
+
+    #attribution a { color: #9090c0; text-decoration: none; }
+
+    /* ── Zoom controls ── */
+    .leaflet-control-zoom {
+      border: none !important;
+    }
+
+    .leaflet-control-zoom a {
+      background: rgba(18, 18, 42, 0.92) !important;
+      color: #fff !important;
+      border: 1px solid rgba(255,255,255,0.1) !important;
+      font-size: 16px !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: rgba(90, 90, 240, 0.6) !important;
+    }
+
+    /* ── Loading overlay ── */
+    #loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(18, 18, 42, 0.7);
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      gap: 16px;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-top-color: #6b7ff0;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loading p { font-size: 14px; color: #aab0d0; }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-text">Chargement des données…</p>
+</div>
+
+<div id="map"></div>
+
+<!-- Info panel -->
+<div id="info-panel">
+  <div class="eyebrow">Les Géomagiciens · Étude de cas</div>
+  <h1>Accessibilité piétonne Gare Part-Dieu, Lyon</h1>
+  <p>Isochrones de marche calculées sur le réseau de voirie OpenStreetMap (5 km/h), arrêts de bus et limites communales.</p>
+  <div class="stats">
+    <div class="stat-item">
+      <div class="value" id="stat-stops">—</div>
+      <div class="label">arrêts de bus</div>
+    </div>
+    <div class="stat-item">
+      <div class="value">3</div>
+      <div class="label">isochrones</div>
+    </div>
+    <div class="stat-item">
+      <div class="value">15 min</div>
+      <div class="label">portée max.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="legend-title">Couches</div>
+
+  <div class="legend-row">
+    <div class="legend-check">
+      <svg viewBox="0 0 10 10" fill="none"><polyline points="2,5 4,7 8,3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div>
+      <div>Isochrones (marche)</div>
+      <div class="iso-gradient" style="margin-top:5px;"></div>
+      <div class="iso-labels"><span>5 min</span><span>10 min</span><span>15 min</span></div>
+    </div>
+  </div>
+
+  <div class="legend-row">
+    <div class="legend-check">
+      <svg viewBox="0 0 10 10" fill="none"><polyline points="2,5 4,7 8,3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="dot-bus"></div>
+    <span>Arrêts de bus</span>
+  </div>
+
+  <div class="legend-row">
+    <div class="legend-check">
+      <svg viewBox="0 0 10 10" fill="none"><polyline points="2,5 4,7 8,3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="dash-line"></div>
+    <span>Contour de Lyon</span>
+  </div>
+</div>
+
+<div id="attribution">
+  Carte réalisée avec Leaflet · <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap</a>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────
+const GARE_PART_DIEU = [45.7605, 4.8591];
+const ISO_COLORS = ['#4fc3f7', '#7c4dff', '#e040fb']; // 5 / 10 / 15 min
+const ISO_MINUTES = [5, 10, 15];
+
+// ── Init map ───────────────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: GARE_PART_DIEU,
+  zoom: 14,
+  zoomControl: true,
+  attributionControl: false,
+});
+
+// Dark basemap
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19,
+  subdomains: 'abcd',
+}).addTo(map);
+
+// ── Layer groups ───────────────────────────────────────────────────────────
+const isoGroup   = L.layerGroup().addTo(map);
+const stopsGroup = L.layerGroup().addTo(map);
+const lyonGroup  = L.layerGroup().addTo(map);
+
+// ── Gare marker ───────────────────────────────────────────────────────────
+const gareIcon = L.divIcon({
+  className: '',
+  html: `<div style="
+    width:16px;height:16px;
+    border-radius:50%;
+    background:#fff;
+    border:3px solid #6b7ff0;
+    box-shadow:0 0 0 4px rgba(107,127,240,0.3);
+  "></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+});
+L.marker(GARE_PART_DIEU, { icon: gareIcon })
+  .bindPopup('<b>Gare de Lyon Part-Dieu</b>')
+  .addTo(map);
+
+// ── Helper: update loading text ───────────────────────────────────────────
+function setLoading(text) {
+  document.getElementById('loading-text').textContent = text;
+}
+
+function hideLoading() {
+  document.getElementById('loading').style.display = 'none';
+}
+
+// ── 1. Fetch isochrones via Valhalla (public OSM instance) ────────────────
+async function fetchIsochrones() {
+  setLoading('Calcul des isochrones piétonnes…');
+
+  const body = {
+    locations: [{ lon: GARE_PART_DIEU[1], lat: GARE_PART_DIEU[0] }],
+    costing: 'pedestrian',
+    contours: ISO_MINUTES.map(m => ({ time: m })),
+    polygons: true,
+    denoise: 1,
+    generalize: 50,
+  };
+
+  const resp = await fetch('https://valhalla1.openstreetmap.de/isochrone', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) throw new Error(`Valhalla HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ── 2. Fetch bus stops via Overpass API ───────────────────────────────────
+async function fetchBusStops() {
+  setLoading('Chargement des arrêts de bus…');
+
+  // Bus stop nodes tagged highway=bus_stop or public_transport=stop_position in Lyon
+  const query = `
+[out:json][timeout:30];
+area["name"="Lyon"]["admin_level"="8"]->.lyon;
+(
+  node["highway"="bus_stop"](area.lyon);
+  node["public_transport"="stop_position"]["bus"="yes"](area.lyon);
+);
+out body;
+`;
+
+  const resp = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: 'data=' + encodeURIComponent(query),
+  });
+
+  if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ── 3. Fetch Lyon commune boundary ────────────────────────────────────────
+async function fetchLyonBoundary() {
+  setLoading('Chargement du contour de Lyon…');
+
+  const query = `
+[out:json][timeout:30];
+relation["name"="Lyon"]["admin_level"="8"]["boundary"="administrative"];
+out geom;
+`;
+
+  const resp = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: 'data=' + encodeURIComponent(query),
+  });
+
+  if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
+  return resp.json();
+}
+
+// ── Convert Overpass relation to GeoJSON polygon ──────────────────────────
+function overpassRelationToGeoJSON(data) {
+  const features = [];
+
+  for (const el of data.elements) {
+    if (el.type !== 'relation') continue;
+
+    // Collect outer ring members
+    const outers = el.members.filter(m => m.role === 'outer');
+    const rings = [];
+
+    for (const member of outers) {
+      if (!member.geometry) continue;
+      const coords = member.geometry.map(p => [p.lon, p.lat]);
+      if (coords.length > 1) rings.push(coords);
+    }
+
+    if (rings.length === 0) continue;
+
+    // Simple approach: use longest outer ring
+    rings.sort((a, b) => b.length - a.length);
+    const ring = rings[0];
+
+    // Close the ring
+    if (ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1]) {
+      ring.push(ring[0]);
+    }
+
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [ring] },
+      properties: el.tags || {},
+    });
+  }
+
+  return { type: 'FeatureCollection', features };
+}
+
+// ── Overpass nodes → GeoJSON ──────────────────────────────────────────────
+function overpassNodesToGeoJSON(data) {
+  return {
+    type: 'FeatureCollection',
+    features: data.elements
+      .filter(e => e.type === 'node')
+      .map(e => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [e.lon, e.lat] },
+        properties: e.tags || {},
+      })),
+  };
+}
+
+// ── Render isochrones ─────────────────────────────────────────────────────
+function renderIsochrones(geojson) {
+  // Valhalla returns features sorted ascending; we want largest first (paint order)
+  const features = [...geojson.features].reverse();
+
+  features.forEach((feature, i) => {
+    const minuteValue = feature.properties.contour; // 15, 10, 5 after reverse
+    const colorIndex = ISO_MINUTES.indexOf(minuteValue);
+    const color = ISO_COLORS[colorIndex >= 0 ? colorIndex : i] ?? '#7c4dff';
+
+    L.geoJSON(feature, {
+      style: {
+        fillColor: color,
+        fillOpacity: colorIndex === 0 ? 0.25 : colorIndex === 1 ? 0.2 : 0.15,
+        color: color,
+        weight: 2,
+        opacity: 0.9,
+      },
+    })
+      .bindPopup(`<b>${minuteValue} min</b> à pied depuis la Gare Part-Dieu`)
+      .addTo(isoGroup);
+  });
+}
+
+// ── Render bus stops ──────────────────────────────────────────────────────
+function renderBusStops(geojson) {
+  const stopIcon = L.circleMarker([0, 0], {
+    radius: 4,
+    fillColor: '#4fc3f7',
+    color: '#fff',
+    weight: 1.5,
+    fillOpacity: 0.9,
+  });
+
+  L.geoJSON(geojson, {
+    pointToLayer: (feature, latlng) =>
+      L.circleMarker(latlng, {
+        radius: 4,
+        fillColor: '#4fc3f7',
+        color: '#fff',
+        weight: 1,
+        fillOpacity: 0.85,
+      }),
+    onEachFeature: (feature, layer) => {
+      const name = feature.properties.name || 'Arrêt de bus';
+      layer.bindPopup(`<b>${name}</b>`);
+    },
+  }).addTo(stopsGroup);
+
+  // Update stat counter
+  document.getElementById('stat-stops').textContent =
+    geojson.features.length.toLocaleString('fr-FR');
+}
+
+// ── Render Lyon boundary ──────────────────────────────────────────────────
+function renderLyonBoundary(geojson) {
+  L.geoJSON(geojson, {
+    style: {
+      color: '#a0b4ff',
+      weight: 2,
+      dashArray: '6 5',
+      fillOpacity: 0,
+      opacity: 0.8,
+    },
+  }).addTo(lyonGroup);
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    // Fire all three requests in parallel
+    const [isoData, stopsData, lyonData] = await Promise.all([
+      fetchIsochrones(),
+      fetchBusStops(),
+      fetchLyonBoundary(),
+    ]);
+
+    setLoading('Rendu de la carte…');
+
+    // Render layers (boundary first, then isochrones, then stops on top)
+    renderLyonBoundary(overpassRelationToGeoJSON(lyonData));
+    renderIsochrones(isoData);
+    renderBusStops(overpassNodesToGeoJSON(stopsData));
+
+    hideLoading();
+  } catch (err) {
+    document.getElementById('loading').innerHTML = `
+      <div style="color:#ff6b6b;font-size:14px;text-align:center;padding:20px;">
+        <b>Erreur lors du chargement des données</b><br/>
+        <span style="color:#aab0d0;font-size:12px;">${err.message}</span><br/><br/>
+        <button onclick="location.reload()" style="
+          background:#6b7ff0;color:#fff;border:none;
+          padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;
+        ">Réessayer</button>
+      </div>
+    `;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>
